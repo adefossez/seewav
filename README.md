@@ -10,13 +10,12 @@ For a demo, click on the image:
 ## Installation
 
 You will need a decently recent version of python, most likely 3.6 or 3.7.
-You will need `ffmpeg` installed somewhere with sufficient codec support. If you are using conda,
-install it with `conda install -c conda-forge ffmpeg`. Alternatively, on OSX with Homebrew,
-you can run `brew install ffmpeg`.
+You will need `ffmpeg` installed with codec support for `libx264` and `aac`.
+On Mac OS X with Homebrew, run `brew install ffmpeg`, on Ubuntu `sudo apt-get install ffmpeg`.
+If you are using Anaconda, you can also do `conda install -c conda-forge ffmpeg`.
+
 
 ```bash
-# Optional, if you use conda, otherwise find a way to install it.
-# conda install -c conda-forge ffmpeg
 pip3 install seewave
 ```
 
