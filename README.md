@@ -1,6 +1,11 @@
 # SeeWav: animation generator for audio waveforms
 
-SeeWav can generate some nice animations for your waveform. See for instance [this page](https://ai.honu.io/misc/androginy/andr.html) for a demo.
+SeeWav can generate some nice animations for your waveform.
+For a demo, click on the image:
+
+<p align="center">
+<a href="https://ai.honu.io/misc/seewav.mp4">
+<img src="./seewav.png" alt="Demo of seewav"></a></p>
 
 ## Installation
 
