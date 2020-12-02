@@ -26,7 +26,7 @@ def colorize(text, color):
     https://stackoverflow.com/questions/4842424/list-of-ansi-color-escape-sequences
     """
     code = f"\033[{color}m"
-    restore = f"\033[0m"
+    restore = "\033[0m"
     return "".join([code, text, restore])
 
 
@@ -169,6 +169,7 @@ def visualize(audio,
     `bars` is the number of bars in the animation.
     `speed` is the base speed of transition. Depending on volume, actual speed will vary
         between 0.5 and 2 times it.
+    `time` amount of audio shown at once on a frame.
     `oversample` higher values will lead to more frequent changes.
     `fg_color` is the rgb color to use for the foreground.
     `bg_color` is the rgb color to use for the background.
@@ -240,7 +241,7 @@ def parse_color(colorstr):
 
 def main():
     parser = argparse.ArgumentParser(
-        'seewav.py', description="Generate a nice mp4 animation from an audio file.")
+        'seewav', description="Generate a nice mp4 animation from an audio file.")
     parser.add_argument("-r", "--rate", type=int, default=60, help="Video framerate.")
     parser.add_argument("-c",
                         "--color",
@@ -248,15 +249,19 @@ def main():
                         type=parse_color,
                         dest="color",
                         help="Color of the bars as `r,g,b` in [0, 1].")
-    parser.add_argument("--white", action="store_true", help="Use white background.")
+    parser.add_argument("--white", action="store_true",
+                        help="Use white background. Default is black.")
     parser.add_argument("-B",
                         "--bars",
                         type=int,
                         default=50,
                         help="Number of bars on the video at once")
-    parser.add_argument("-O", "--oversample", type=float, default=4)
-    parser.add_argument("-T", "--time", type=float, default=0.4)
-    parser.add_argument("-S", "--speed", type=float, default=4)
+    parser.add_argument("-O", "--oversample", type=float, default=4,
+                        help="Lower values will feel less reactive.")
+    parser.add_argument("-T", "--time", type=float, default=0.4,
+                        help="Amount of audio shown at once on a frame.")
+    parser.add_argument("-S", "--speed", type=float, default=4,
+                        help="Higher values means faster transitions between frames.")
     parser.add_argument("-W",
                         "--width",
                         type=int,
