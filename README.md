@@ -1,5 +1,7 @@
 # SeeWav: animation generator for audio waveforms
 
+SeeWav can generate some nice animations for your waveform. See for instance [this page](https://ai.honu.io/misc/androginy/andr.html) for a demo.
+
 ## Installation
 
 You will need a decently recent version of python, most likely 3.6 or 3.7.
