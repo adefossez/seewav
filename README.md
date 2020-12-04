@@ -16,14 +16,14 @@ If you are using Anaconda, you can also do `conda install -c conda-forge ffmpeg`
 
 
 ```bash
-pip3 install seewave
+pip3 install seewav
 ```
 
 ## Usage
 
 
 ```bash
-seewave AUDIO_FILE [OUTPUT_FILE]
+seewav AUDIO_FILE [OUTPUT_FILE]
 ```
 By default, outputs to `out.mp4`. Available options:
 
