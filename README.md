@@ -9,7 +9,7 @@ For a demo, click on the image:
 
 ## Installation
 
-You will need a decently recent version of python, most likely 3.6 or 3.7.
+You will need Python 3.7.
 You will need `ffmpeg` installed with codec support for `libx264` and `aac`.
 On Mac OS X with Homebrew, run `brew install ffmpeg`, on Ubuntu `sudo apt-get install ffmpeg`.
 If you are using Anaconda, you can also do `conda install -c conda-forge ffmpeg`.
