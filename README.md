@@ -28,7 +28,7 @@ seewav AUDIO_FILE [OUTPUT_FILE]
 By default, outputs to `out.mp4`. Available options:
 
 ```bash
-usage: seewav [-h] [-r RATE] [-c COLOR] [--white] [-B BARS] [-O OVERSAMPLE] [-T TIME] [-S SPEED] [-W WIDTH] [-H HEIGHT] [-s SEEK] [-d DURATION] audio [out]
+usage: seewav [-h] [-r RATE] [--stereo] [-c COLOR] [-c2 COLOR2] [--white] [-B BARS] [-O OVERSAMPLE] [-T TIME] [-S SPEED] [-W WIDTH] [-H HEIGHT] [-s SEEK] [-d DURATION] audio [out]
 
 Generate a nice mp4 animation from an audio file.
 
@@ -39,8 +39,11 @@ positional arguments:
 optional arguments:
   -h, --help            show this help message and exit
   -r RATE, --rate RATE  Video framerate.
+  --stereo              Create 2 waveforms for stereo files.
   -c COLOR, --color COLOR
                         Color of the bars as `r,g,b` in [0, 1].
+  -c2 COLOR2, --color2 COLOR2
+                        Color of the second waveform as `r,g,b` in [0, 1] (for stereo).
   --white               Use white background. Default is black.
   -B BARS, --bars BARS  Number of bars on the video at once
   -O OVERSAMPLE, --oversample OVERSAMPLE
