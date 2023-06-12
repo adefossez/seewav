@@ -272,7 +272,7 @@ def main():
         'seewav', description="Generate a nice mp4 animation from an audio file.")
     parser.add_argument("-r", "--rate", type=int, default=60, help="Video framerate.")
     parser.add_argument("--stereo", action='store_true',
-                        help="Stereo file (separate 2 channels).")
+                        help="Create 2 waveforms for stereo files.")
     parser.add_argument("-c",
                         "--color",
                         default=[0.03, 0.6, 0.3],
@@ -284,7 +284,7 @@ def main():
                         default=[0.5, 0.3, 0.6],
                         type=parse_color,
                         dest="color2",
-                        help="Color of the second bars as `r,g,b` in [0, 1] (for stereo).")
+                        help="Color of the second waveform as `r,g,b` in [0, 1] (for stereo).")
     parser.add_argument("--white", action="store_true",
                         help="Use white background. Default is black.")
     parser.add_argument("-B",
