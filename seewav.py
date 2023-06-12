@@ -125,7 +125,6 @@ def draw_env(envs, out, fg_colors, bg_color, size):
 
     K = len(envs) # Number of waves to draw (waves are stacked vertically)
     T = len(envs[0]) # Numbert of time steps
-    # width = 1. / T
     pad_ratio = 0.1 # spacing ratio between 2 bars
     width = 1. / (T * (1 + 2 * pad_ratio))
     pad = pad_ratio * width
@@ -193,13 +192,13 @@ def visualize(audio,
         raise
     # wavs is a list of wav over channels
     wavs = []
-    if not stereo:
-        wav = wav.mean(0)
-        wavs.append(wav)
-    else:
+    if stereo:
         assert wav.shape[0] == 2, 'stereo requires stereo audio file'
         wavs.append(wav[0])
         wavs.append(wav[1])
+    else:
+        wav = wav.mean(0)
+        wavs.append(wav)
 
     for i, wav in enumerate(wavs):
         wavs[i] = wav/wav.std()
@@ -332,8 +331,7 @@ def main():
                   fg_color2=args.color2,
                   bg_color=[1. * bool(args.white)] * 3,
                   size=(args.width, args.height),
-                  stereo=args.stereo,
-                  )
+                  stereo=args.stereo)
 
 
 if __name__ == "__main__":
