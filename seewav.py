@@ -108,11 +108,12 @@ def envelope(wav, window, stride):
     return out
 
 
-def draw_env(env, out, fg_color, bg_color, size):
+def draw_env(envs, out, fg_colors, bg_color, size):
     """
-    Internal function, draw a single frame using cairo and save it to the `out` file as png.
-    env is float[bars], representing the height of the envelope to draw. Each entry will be
-    represented by a bar.
+    Internal function, draw a single frame (two frames for stereo) using cairo and save
+    it to the `out` file as png. envs is a list of envelopes over channels, each env
+    is a float[bars] representing the height of the envelope to draw. Each entry will
+    be represented by a bar.
     """
     surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, *size)
     ctx = cairo.Context(surface)
@@ -122,23 +123,27 @@ def draw_env(env, out, fg_color, bg_color, size):
     ctx.rectangle(0, 0, 1, 1)
     ctx.fill()
 
-    width = 1. / len(env)
-    pad_ratio = 0.1
-    width = 1. / (len(env) * (1 + 2 * pad_ratio))
+    K = len(envs) # Number of waves to draw (waves are stacked vertically)
+    T = len(envs[0]) # Numbert of time steps
+    pad_ratio = 0.1 # spacing ratio between 2 bars
+    width = 1. / (T * (1 + 2 * pad_ratio))
     pad = pad_ratio * width
     delta = 2 * pad + width
 
     ctx.set_line_width(width)
-    for step in range(len(env)):
-        half = 0.5 * env[step]
-        ctx.set_source_rgb(*fg_color)
-        ctx.move_to(pad + step * delta, 0.5 - half)
-        ctx.line_to(pad + step * delta, 0.5)
-        ctx.stroke()
-        ctx.set_source_rgba(*fg_color, 0.8)
-        ctx.move_to(pad + step * delta, 0.5)
-        ctx.line_to(pad + step * delta, 0.5 + 0.9 * half)
-        ctx.stroke()
+    for step in range(T):
+        for i in range(K):
+            half = 0.5 * envs[i][step] # (semi-)height of the bar
+            half /= K # as we stack K waves vertically
+            midrule = (1+2*i)/(2*K) # midrule of i-th wave
+            ctx.set_source_rgb(*fg_colors[i])
+            ctx.move_to(pad + step * delta, midrule - half)
+            ctx.line_to(pad + step * delta, midrule)
+            ctx.stroke()
+            ctx.set_source_rgba(*fg_colors[i], 0.8)
+            ctx.move_to(pad + step * delta, midrule)
+            ctx.line_to(pad + step * delta, midrule + 0.9 * half)
+            ctx.stroke()
 
     surface.write_to_png(out)
 
@@ -158,8 +163,11 @@ def visualize(audio,
               time=0.4,
               oversample=3,
               fg_color=(.2, .2, .2),
+              fg_color2=(.5, .3, .6),
               bg_color=(1, 1, 1),
-              size=(400, 400)):
+              size=(400, 400),
+              stereo=False,
+              ):
     """
     Generate the visualisation for the `audio` file, using a `tmp` folder and saving the final
     video in `out`.
@@ -172,24 +180,40 @@ def visualize(audio,
     `time` amount of audio shown at once on a frame.
     `oversample` higher values will lead to more frequent changes.
     `fg_color` is the rgb color to use for the foreground.
+    `fg_color2` is the rgb color to use for the second wav if stereo is set.
     `bg_color` is the rgb color to use for the background.
     `size` is the `(width, height)` in pixels to generate.
+    `stereo` is whether to create 2 waves.
     """
     try:
         wav, sr = read_audio(audio, seek=seek, duration=duration)
     except (IOError, ValueError) as err:
         fatal(err)
         raise
-    wav = wav.mean(0)
-    wav /= wav.std()
+    # wavs is a list of wav over channels
+    wavs = []
+    if stereo:
+        assert wav.shape[0] == 2, 'stereo requires stereo audio file'
+        wavs.append(wav[0])
+        wavs.append(wav[1])
+    else:
+        wav = wav.mean(0)
+        wavs.append(wav)
+
+    for i, wav in enumerate(wavs):
+        wavs[i] = wav/wav.std()
 
     window = int(sr * time / bars)
     stride = int(window / oversample)
-    env = envelope(wav, window, stride)
+    # envs is a list of env over channels
+    envs = []
+    for wav in wavs:
+        env = envelope(wav, window, stride)
+        env = np.pad(env, (bars // 2, 2 * bars))
+        envs.append(env)
 
-    duration = len(wav) / sr
+    duration = len(wavs[0]) / sr
     frames = int(rate * duration)
-    env = np.pad(env, (bars // 2, 2 * bars))
     smooth = np.hanning(bars)
 
     print("Generating the frames...")
@@ -197,16 +221,19 @@ def visualize(audio,
         pos = (((idx / rate)) * sr) / stride / bars
         off = int(pos)
         loc = pos - off
-        env1 = env[off * bars:(off + 1) * bars]
-        env2 = env[(off + 1) * bars:(off + 2) * bars]
+        denvs = []
+        for env in envs:
+            env1 = env[off * bars:(off + 1) * bars]
+            env2 = env[(off + 1) * bars:(off + 2) * bars]
 
-        # we want loud parts to be updated faster
-        maxvol = math.log10(1e-4 + env2.max()) * 10
-        speedup = np.clip(interpole(-6, 0.5, 0, 2, maxvol), 0.5, 2)
-        w = sigmoid(speed * speedup * (loc - 0.5))
-        denv = (1 - w) * env1 + w * env2
-        denv *= smooth
-        draw_env(denv, tmp / f"{idx:06d}.png", fg_color, bg_color, size)
+            # we want loud parts to be updated faster
+            maxvol = math.log10(1e-4 + env2.max()) * 10
+            speedup = np.clip(interpole(-6, 0.5, 0, 2, maxvol), 0.5, 2)
+            w = sigmoid(speed * speedup * (loc - 0.5))
+            denv = (1 - w) * env1 + w * env2
+            denv *= smooth
+            denvs.append(denv)
+        draw_env(denvs, tmp / f"{idx:06d}.png", (fg_color, fg_color2), bg_color, size)
 
     audio_cmd = []
     if seek is not None:
@@ -243,12 +270,20 @@ def main():
     parser = argparse.ArgumentParser(
         'seewav', description="Generate a nice mp4 animation from an audio file.")
     parser.add_argument("-r", "--rate", type=int, default=60, help="Video framerate.")
+    parser.add_argument("--stereo", action='store_true',
+                        help="Create 2 waveforms for stereo files.")
     parser.add_argument("-c",
                         "--color",
                         default=[0.03, 0.6, 0.3],
                         type=parse_color,
                         dest="color",
                         help="Color of the bars as `r,g,b` in [0, 1].")
+    parser.add_argument("-c2",
+                        "--color2",
+                        default=[0.5, 0.3, 0.6],
+                        type=parse_color,
+                        dest="color2",
+                        help="Color of the second waveform as `r,g,b` in [0, 1] (for stereo).")
     parser.add_argument("--white", action="store_true",
                         help="Use white background. Default is black.")
     parser.add_argument("-B",
@@ -293,8 +328,10 @@ def main():
                   oversample=args.oversample,
                   time=args.time,
                   fg_color=args.color,
+                  fg_color2=args.color2,
                   bg_color=[1. * bool(args.white)] * 3,
-                  size=(args.width, args.height))
+                  size=(args.width, args.height),
+                  stereo=args.stereo)
 
 
 if __name__ == "__main__":
