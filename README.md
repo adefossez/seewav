@@ -29,7 +29,7 @@ By default, outputs to `out.mp4`. Available options:
 
 ```bash
 usage: seewav [-h] [-r RATE] [--stereo] [-c COLOR] [-c2 COLOR2] [-o OPACITY]
-              [-B BARS] [-O OVERSAMPLE] [-C COORDS] [-b COLOR] [-i IMAGE]
+              [-B BARS] [-O OVERSAMPLE] [-C COORDS] [-b COLOR] [--white] [-i IMAGE]
               [-T TIME] [-S SPEED] [-W WIDTH] [-H HEIGHT] [-s SEEK] [-d DURATION]
               audio [out]
 
@@ -50,6 +50,7 @@ optional arguments:
                         stereo).
   -o OPACITY            The opacity of the waveform on the background.
   -b COLOR              Set background color. Default is black.
+  --white               Legacy toggle to use white background.
   -i IMAGE              Set background image.
   -C COORDS             Set the center of the bars relative to the image if used.
   -B BARS, --bars BARS  Number of bars on the video at once

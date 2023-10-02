@@ -341,6 +341,8 @@ def main():
                         type=parse_color,
                         dest="background",
                         help="Set the background. r,g,b` in [0, 1]. Default is black (0,0,0).")
+    parser.add_argument("--white", action="store_true",
+                        help="Use white background. Default is black.")
     parser.add_argument("-i",
                         "--image",
                         dest="image",
@@ -395,7 +397,7 @@ def main():
                   fg_color=args.color,
                   fg_color2=args.color2,
                   fg_opacity=args.opacity,
-                  bg_color=args.background,
+                  bg_color=[1.] * 3 if bool(args.white) else args.background,
                   bg_image=args.image,
                   center=args.center,
                   size=(args.width, args.height),
