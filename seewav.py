@@ -222,10 +222,10 @@ def visualize(audio,
             fatal(err)
             raise
         # resize image to be compatible with ffmpeg
-        if image.width % 2 is 1:
-            image = image.resize(image.width + 1, image.height)
-        if image.height % 2 is 1:
-            image = image.resize(image.width, image.height + 1)
+        if image.width % 2 == 1:
+            image = image.resize((image.width + 1, image.height))
+        if image.height % 2 == 1:
+            image = image.resize((image.width, image.height + 1))
         output_size = image.width, image.height
 
     # wavs is a list of wav over channels
