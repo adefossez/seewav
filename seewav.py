@@ -247,7 +247,7 @@ def visualize(audio,
         "ffmpeg", "-y", "-loglevel", "panic", "-r",
         str(rate), "-f", "image2", "-s", f"{size[0]}x{size[1]}", "-i", "%06d.png"
     ] + audio_cmd + [
-        "-c:a", "aac", "-vcodec", "libx264", "-crf", "10", "-pix_fmt", "yuv420p", "-shortest",
+        "-c:a", "aac", "-vcodec", "libx264", "-crf", "10", "-pix_fmt", "yuv420p",
         out.resolve()
     ],
            check=True,
