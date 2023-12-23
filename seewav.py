@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 
 import cairo
+import PIL.Image as Image
 import numpy as np
 import tqdm
 
@@ -106,22 +107,38 @@ def envelope(wav, window, stride):
     # Some form of audio compressor based on the sigmoid.
     out = 1.9 * (sigmoid(2.5 * out) - 0.5)
     return out
+    
+def pil_to_surface(image):
+    """
+    Internal function, create cairo surface from Pillow image
+    """
+    if 'A' not in image.getbands():
+        image.putalpha(int(256))
+    return cairo.ImageSurface.create_for_data(bytearray(image.tobytes('raw', 'BGRa')), cairo.FORMAT_ARGB32, image.width, image.height)
 
-
-def draw_env(envs, out, fg_colors, bg_color, size):
+def draw_env(envs, out, fg_colors, fg_opacity, bg_color, bg_image, center, size):
     """
     Internal function, draw a single frame (two frames for stereo) using cairo and save
     it to the `out` file as png. envs is a list of envelopes over channels, each env
     is a float[bars] representing the height of the envelope to draw. Each entry will
     be represented by a bar.
     """
-    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, *size)
+    if bg_image is None:
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, *size)
+        offset = [0, 0]
+    else:
+        surface = pil_to_surface(bg_image)
+        # offset needs to be relative to the size of the surface, not the size of the background image
+        offset = [
+            (bg_image.width * center[0] - size[0] / 2) / size[0],
+            (bg_image.height * center[1] - size[1] / 2) / size[1]
+        ]
     ctx = cairo.Context(surface)
     ctx.scale(*size)
-
-    ctx.set_source_rgb(*bg_color)
-    ctx.rectangle(0, 0, 1, 1)
-    ctx.fill()
+    if bg_image is None:
+        ctx.set_source_rgb(*bg_color)
+        ctx.rectangle(0, 0, 1, 1)
+        ctx.fill()
 
     K = len(envs) # Number of waves to draw (waves are stacked vertically)
     T = len(envs[0]) # Numbert of time steps
@@ -130,17 +147,18 @@ def draw_env(envs, out, fg_colors, bg_color, size):
     pad = pad_ratio * width
     delta = 2 * pad + width
 
+    ctx.translate(*offset)
     ctx.set_line_width(width)
     for step in range(T):
         for i in range(K):
             half = 0.5 * envs[i][step] # (semi-)height of the bar
             half /= K # as we stack K waves vertically
             midrule = (1+2*i)/(2*K) # midrule of i-th wave
-            ctx.set_source_rgb(*fg_colors[i])
+            ctx.set_source_rgba(*fg_colors[i], fg_opacity)
             ctx.move_to(pad + step * delta, midrule - half)
             ctx.line_to(pad + step * delta, midrule)
             ctx.stroke()
-            ctx.set_source_rgba(*fg_colors[i], 0.8)
+            ctx.set_source_rgba(*fg_colors[i], fg_opacity - fg_opacity / 5)
             ctx.move_to(pad + step * delta, midrule)
             ctx.line_to(pad + step * delta, midrule + 0.9 * half)
             ctx.stroke()
@@ -164,8 +182,11 @@ def visualize(audio,
               oversample=3,
               fg_color=(.2, .2, .2),
               fg_color2=(.5, .3, .6),
+              fg_opacity=1,
               bg_color=(1, 1, 1),
-              size=(400, 400),
+              bg_image=None,
+              center=(.5, .5),
+              size=(400, 300),
               stereo=False,
               ):
     """
@@ -182,6 +203,7 @@ def visualize(audio,
     `fg_color` is the rgb color to use for the foreground.
     `fg_color2` is the rgb color to use for the second wav if stereo is set.
     `bg_color` is the rgb color to use for the background.
+    `bg_image` is the path to the PNG image to use for the background.
     `size` is the `(width, height)` in pixels to generate.
     `stereo` is whether to create 2 waves.
     """
@@ -190,6 +212,22 @@ def visualize(audio,
     except (IOError, ValueError) as err:
         fatal(err)
         raise
+
+    output_size = size
+    image = None
+    if bg_image is not None:
+        try:
+            image = Image.open(bg_image)
+        except (IOError, ValueError) as err:
+            fatal(err)
+            raise
+        # resize image to be compatible with ffmpeg
+        if image.width % 2 == 1:
+            image = image.resize((image.width + 1, image.height))
+        if image.height % 2 == 1:
+            image = image.resize((image.width, image.height + 1))
+        output_size = image.width, image.height
+
     # wavs is a list of wav over channels
     wavs = []
     if stereo:
@@ -233,7 +271,7 @@ def visualize(audio,
             denv = (1 - w) * env1 + w * env2
             denv *= smooth
             denvs.append(denv)
-        draw_env(denvs, tmp / f"{idx:06d}.png", (fg_color, fg_color2), bg_color, size)
+        draw_env(denvs, tmp / f"{idx:06d}.png", (fg_color, fg_color2), fg_opacity, bg_color, image, center, size)
 
     audio_cmd = []
     if seek is not None:
@@ -245,7 +283,7 @@ def visualize(audio,
     # https://hamelot.io/visualization/using-ffmpeg-to-convert-a-set-of-images-into-a-video/
     sp.run([
         "ffmpeg", "-y", "-loglevel", "panic", "-r",
-        str(rate), "-f", "image2", "-s", f"{size[0]}x{size[1]}", "-i", "%06d.png"
+        str(rate), "-f", "image2", "-s", f"{output_size[0]}x{output_size[1]}", "-i", "%06d.png"
     ] + audio_cmd + [
         "-c:a", "aac", "-vcodec", "libx264", "-crf", "10", "-pix_fmt", "yuv420p",
         out.resolve()
@@ -263,6 +301,17 @@ def parse_color(colorstr):
         return r, g, b
     except ValueError:
         fatal("Format for color is 3 floats separated by commas 0.xx,0.xx,0.xx, rgb order")
+        raise
+
+def parse_coords(coordsstr):
+    """
+    Given a comma separated float x and y coords, returns a tuple of float.
+    """
+    try:
+        x, y = [float(i) for i in coordsstr.split(",")]
+        return x, y
+    except ValueError:
+        fatal("Format for coords is 2 floats separated by commas 0.x,0.y, xy order")
         raise
 
 
@@ -284,8 +333,20 @@ def main():
                         type=parse_color,
                         dest="color2",
                         help="Color of the second waveform as `r,g,b` in [0, 1] (for stereo).")
+    parser.add_argument("-o", "--opacity", type=float, default=1,
+                        help="The opacity of the waveform on the background.")
+    parser.add_argument("-b",
+                        "--background",
+                        default=[0, 0, 0],
+                        type=parse_color,
+                        dest="background",
+                        help="Set the background. r,g,b` in [0, 1]. Default is black (0,0,0).")
     parser.add_argument("--white", action="store_true",
                         help="Use white background. Default is black.")
+    parser.add_argument("-i",
+                        "--image",
+                        dest="image",
+                        help="Set the background image.")
     parser.add_argument("-B",
                         "--bars",
                         type=int,
@@ -307,6 +368,12 @@ def main():
                         type=int,
                         default=300,
                         help="height in pixels of the animation")
+    parser.add_argument("-C",
+                        "--center",
+                        default=[0.5, 0.5],
+                        type=parse_coords,
+                        dest="center",
+                        help="The center of the bars relative to the image.")
     parser.add_argument("-s", "--seek", type=float, help="Seek to time in seconds in video.")
     parser.add_argument("-d", "--duration", type=float, help="Duration in seconds from seek time.")
     parser.add_argument("audio", type=Path, help='Path to audio file')
@@ -329,7 +396,10 @@ def main():
                   time=args.time,
                   fg_color=args.color,
                   fg_color2=args.color2,
-                  bg_color=[1. * bool(args.white)] * 3,
+                  fg_opacity=args.opacity,
+                  bg_color=[1.] * 3 if bool(args.white) else args.background,
+                  bg_image=args.image,
+                  center=args.center,
                   size=(args.width, args.height),
                   stereo=args.stereo)
 
