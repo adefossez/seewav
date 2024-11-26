@@ -1,0 +1,31 @@
+build:
+  python_version: "3.9"  # Define la versión de Python
+  gpu: true  # Habilitar soporte para GPU
+  cuda: "12.1"  # Especificar la versión de CUDA compatible con cupy-cuda12x
+  python_packages:
+    - cupy-cuda12x==11.6.0
+    - fastrlock==0.8.2
+    - imageio==2.31.2
+    - imageio-ffmpeg==0.5.1
+    - numpy==1.21.6
+    - Pillow==9.5.0
+    - psutil==6.1.0
+    - tqdm==4.67.0
+  system_packages:
+    - libcairo2-dev  # Necesario para pycairo
+    - libjpeg-dev
+    - libgif-dev
+    - libpng-dev
+    - meson
+    - ninja-build
+    - build-essential
+    - ffmpeg
+    - git
+  run:
+    - pip install --upgrade pip
+    - pip uninstall -y pycairo  # Reinstalar pycairo para asegurar compatibilidad
+    - pip install pycairo
+    - pip uninstall cog -y
+    - pip install cog
+
+predict: "predict.py:Predictor"  # Punto de entrada para predicciones

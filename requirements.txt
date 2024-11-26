@@ -1,3 +1,9 @@
-numpy
-pycairo
-tqdm
+cupy-cuda12x==11.6.0
+fastrlock==0.8.2
+imageio==2.31.2
+imageio-ffmpeg==0.5.1
+numpy==1.21.6
+Pillow==9.5.0
+psutil==6.1.0
+pycairo==1.23.0
+tqdm==4.67.0
