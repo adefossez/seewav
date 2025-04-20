@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# ---------------------------------------------------------------------------
+# GitHub Actions workflow to run the unit‑tests included in *seewav*.
+#
+# The project is pure‑Python; the only native dependency required by the tests
+# is *ffmpeg*.  The real *pycairo* bindings are not needed because the test‑
+# suite installs a lightweight stub in ``tests/conftest.py``.
+# ---------------------------------------------------------------------------
+
+jobs:
+  tests:
+    name: "Python ${{ matrix.python-version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # -------------------------------------------------------------------
+      # Install runtime and test dependencies.  We purposefully avoid
+      # installing the *pycairo* wheel as it requires GTK/Cairo headers that
+      # are not available by default on GitHub runners.  The library is
+      # stubbed in the test‑suite so it is safe to omit.
+      # -------------------------------------------------------------------
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Runtime + test deps
+          pip install numpy tqdm pytest pytest-cov
+
+      # -------------------------------------------------------------------
+      # Optional native dependencies ------------------------------------------------
+      # *ffmpeg* is only required for one integration test.  If the package
+      # fails to install the test will be automatically skipped, but having
+      # it available gives us a little extra coverage.
+      # -------------------------------------------------------------------
+      - name: Install ffmpeg (optional)
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y ffmpeg
+        continue-on-error: true
+
+      - name: Run test‑suite with coverage
+        run: |
+          pytest -vv --cov=seewav --cov-report=term-missing --cov-report=xml
+
+      # Save coverage artefacts (optional). They can later be uploaded to a
+      # coverage tracking service like Codecov or Coveralls.
+      - name: Persist coverage report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: ignore

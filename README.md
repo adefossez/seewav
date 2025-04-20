@@ -19,6 +19,34 @@ If you are using Anaconda, you can also do `conda install -c conda-forge ffmpeg`
 pip3 install seewav
 ```
 
+## Library usage & type‑safety
+
+``seewav`` can also be used as a regular Python module.  All public
+functions expose explicit PEP‑484 type annotations so you can enjoy static
+analysis with tools such as *mypy* or *pyright*.
+
+Example:
+
+```python
+from pathlib import Path
+import tempfile, seewav
+
+with tempfile.TemporaryDirectory() as tmp:
+    seewav.visualize(
+        "my_song.wav",
+        Path(tmp),
+        Path("out.mp4"),
+        size=(640, 360),  # width / height can be supplied as this tuple
+    )
+```
+
+If you prefer separate parameters at the CLI, use ``-W/--width`` and
+``-H/--height``—the library interface always expects a ``size`` tuple.
+
+The continuous‑integration pipeline includes a dedicated test that fails if a
+new public helper is added without the corresponding annotations, ensuring the
+type coverage stays at 100 %.
+
 ## Usage
 
 
@@ -55,10 +83,12 @@ optional arguments:
   -T TIME, --time TIME  Amount of audio shown at once on a frame.
   -S SPEED, --speed SPEED
                         Higher values means faster transitions between frames.
+  --size WxH            Output video dimension (e.g. 480x300). Overrides
+                        -W/-H when provided.
   -W WIDTH, --width WIDTH
-                        width in pixels of the animation
+                        Width in pixels of the animation (default: 480)
   -H HEIGHT, --height HEIGHT
-                        height in pixels of the animation
+                        Height in pixels of the animation (default: 300)
   -s SEEK, --seek SEEK  Seek to time in seconds in video.
   -d DURATION, --duration DURATION
                         Duration in seconds from seek time.

@@ -1,0 +1,10 @@
+[run]
+# Omit virtual envs and the test‑suite itself from coverage results.
+omit =
+    */tests/*
+    */.venv/*
+    */venv/*
+
+[report]
+# Show missing lines in the terminal summary produced by ``--cov-report=term-missing``.
+show_missing = True

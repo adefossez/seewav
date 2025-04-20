@@ -5,6 +5,9 @@
 """
 Generates a nice waveform visualization from an audio file, save it as a mp4 file.
 """
+
+from __future__ import annotations
+
 import argparse
 import json
 import math
@@ -12,6 +15,7 @@ import subprocess as sp
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any, Dict, List, Sequence, Tuple
 
 import cairo
 import numpy as np
@@ -20,7 +24,7 @@ import tqdm
 _is_main = False
 
 
-def colorize(text, color):
+def colorize(text: str, color: int) -> str:
     """
     Wrap `text` with ANSI `color` code. See
     https://stackoverflow.com/questions/4842424/list-of-ansi-color-escape-sequences
@@ -30,7 +34,7 @@ def colorize(text, color):
     return "".join([code, text, restore])
 
 
-def fatal(msg):
+def fatal(msg: Any) -> None:
     """
     Something bad happened. Does nothing if this module is not __main__.
     Display an error message and abort.
@@ -43,21 +47,33 @@ def fatal(msg):
         sys.exit(1)
 
 
-def read_info(media):
+def read_info(media: Path | str) -> Dict[str, Any]:
     """
     Return some info on the media file.
     """
-    proc = sp.run([
-        'ffprobe', "-loglevel", "panic",
-        str(media), '-print_format', 'json', '-show_format', '-show_streams'
-    ],
-                  capture_output=True)
+    proc = sp.run(
+        [
+            "ffprobe",
+            "-loglevel",
+            "panic",
+            str(media),
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+        ],
+        capture_output=True,
+    )
     if proc.returncode:
         raise IOError(f"{media} does not exist or is of a wrong type.")
-    return json.loads(proc.stdout.decode('utf-8'))
+    return json.loads(proc.stdout.decode("utf-8"))
 
 
-def read_audio(audio, seek=None, duration=None):
+def read_audio(
+    audio: Path | str,
+    seek: float | None = None,
+    duration: float | None = None,
+) -> tuple[np.ndarray, float]:
     """
     Read the `audio` file, starting at `seek` (or 0) seconds for `duration` (or all)  seconds.
     Returns `float[channels, samples]`.
@@ -65,33 +81,34 @@ def read_audio(audio, seek=None, duration=None):
 
     info = read_info(audio)
     channels = None
-    stream = info['streams'][0]
+    stream = info["streams"][0]
     if stream["codec_type"] != "audio":
         raise ValueError(f"{audio} should contain only audio.")
-    channels = stream['channels']
-    samplerate = float(stream['sample_rate'])
+    channels = stream["channels"]
+    samplerate = float(stream["sample_rate"])
 
     # Good old ffmpeg
-    command = ['ffmpeg', '-y']
-    command += ['-loglevel', 'panic']
+    command = ["ffmpeg", "-y"]
+    command += ["-loglevel", "panic"]
     if seek is not None:
-        command += ['-ss', str(seek)]
-    command += ['-i', audio]
+        command += ["-ss", str(seek)]
+    command += ["-i", audio]
     if duration is not None:
-        command += ['-t', str(duration)]
-    command += ['-f', 'f32le']
-    command += ['-']
+        command += ["-t", str(duration)]
+    command += ["-f", "f32le"]
+    command += ["-"]
 
     proc = sp.run(command, check=True, capture_output=True)
     wav = np.frombuffer(proc.stdout, dtype=np.float32)
     return wav.reshape(-1, channels).T, samplerate
 
 
-def sigmoid(x):
+def sigmoid(x: np.ndarray | float) -> np.ndarray | float:
+    """Standard logistic function."""
     return 1 / (1 + np.exp(-x))
 
 
-def envelope(wav, window, stride):
+def envelope(wav: np.ndarray, window: int, stride: int) -> np.ndarray:
     """
     Extract the envelope of the waveform `wav` (float[samples]), using average pooling
     with `window` samples and the given `stride`.
@@ -100,7 +117,7 @@ def envelope(wav, window, stride):
     wav = np.pad(wav, window // 2)
     out = []
     for off in range(0, len(wav) - window, stride):
-        frame = wav[off:off + window]
+        frame = wav[off : off + window]
         out.append(np.maximum(frame, 0).mean())
     out = np.array(out)
     # Some form of audio compressor based on the sigmoid.
@@ -108,7 +125,13 @@ def envelope(wav, window, stride):
     return out
 
 
-def draw_env(envs, out, fg_colors, bg_color, size):
+def draw_env(
+    envs: Sequence[np.ndarray],
+    out: Path,
+    fg_colors: Sequence[Tuple[float, float, float]],
+    bg_color: Tuple[float, float, float],
+    size: Tuple[int, int],
+) -> None:
     """
     Internal function, draw a single frame (two frames for stereo) using cairo and save
     it to the `out` file as png. envs is a list of envelopes over channels, each env
@@ -123,19 +146,19 @@ def draw_env(envs, out, fg_colors, bg_color, size):
     ctx.rectangle(0, 0, 1, 1)
     ctx.fill()
 
-    K = len(envs) # Number of waves to draw (waves are stacked vertically)
-    T = len(envs[0]) # Numbert of time steps
-    pad_ratio = 0.1 # spacing ratio between 2 bars
-    width = 1. / (T * (1 + 2 * pad_ratio))
+    K = len(envs)  # Number of waves to draw (waves are stacked vertically)
+    T = len(envs[0])  # Numbert of time steps
+    pad_ratio = 0.1  # spacing ratio between 2 bars
+    width = 1.0 / (T * (1 + 2 * pad_ratio))
     pad = pad_ratio * width
     delta = 2 * pad + width
 
     ctx.set_line_width(width)
     for step in range(T):
         for i in range(K):
-            half = 0.5 * envs[i][step] # (semi-)height of the bar
-            half /= K # as we stack K waves vertically
-            midrule = (1+2*i)/(2*K) # midrule of i-th wave
+            half = 0.5 * envs[i][step]  # (semi-)height of the bar
+            half /= K  # as we stack K waves vertically
+            midrule = (1 + 2 * i) / (2 * K)  # midrule of i-th wave
             ctx.set_source_rgb(*fg_colors[i])
             ctx.move_to(pad + step * delta, midrule - half)
             ctx.line_to(pad + step * delta, midrule)
@@ -148,26 +171,32 @@ def draw_env(envs, out, fg_colors, bg_color, size):
     surface.write_to_png(out)
 
 
-def interpole(x1, y1, x2, y2, x):
+def interpole(x1: float, y1: float, x2: float, y2: float, x: float) -> float:
+    """Linear interpolation for a point ``x`` between two points.
+
+    Returns a value on the line joining *(x1, y1)* and *(x2, y2)*.
+    """
     return y1 + (y2 - y1) * (x - x1) / (x2 - x1)
 
 
-def visualize(audio,
-              tmp,
-              out,
-              seek=None,
-              duration=None,
-              rate=60,
-              bars=50,
-              speed=4,
-              time=0.4,
-              oversample=3,
-              fg_color=(.2, .2, .2),
-              fg_color2=(.5, .3, .6),
-              bg_color=(1, 1, 1),
-              size=(400, 400),
-              stereo=False,
-              ):
+def visualize(
+    audio: Path | str,
+    tmp: Path,
+    out: Path,
+    *,
+    seek: float | None = None,
+    duration: float | None = None,
+    rate: int = 60,
+    bars: int = 50,
+    speed: float = 4,
+    time: float = 0.4,
+    oversample: int = 3,
+    fg_color: Tuple[float, float, float] = (0.2, 0.2, 0.2),
+    fg_color2: Tuple[float, float, float] = (0.5, 0.3, 0.6),
+    bg_color: Tuple[float, float, float] = (1, 1, 1),
+    size: Tuple[int, int] = (400, 400),
+    stereo: bool = False,
+) -> None:
     """
     Generate the visualisation for the `audio` file, using a `tmp` folder and saving the final
     video in `out`.
@@ -193,7 +222,7 @@ def visualize(audio,
     # wavs is a list of wav over channels
     wavs = []
     if stereo:
-        assert wav.shape[0] == 2, 'stereo requires stereo audio file'
+        assert wav.shape[0] == 2, "stereo requires stereo audio file"
         wavs.append(wav[0])
         wavs.append(wav[1])
     else:
@@ -201,7 +230,7 @@ def visualize(audio,
         wavs.append(wav)
 
     for i, wav in enumerate(wavs):
-        wavs[i] = wav/wav.std()
+        wavs[i] = wav / wav.std()
 
     window = int(sr * time / bars)
     stride = int(window / oversample)
@@ -218,13 +247,13 @@ def visualize(audio,
 
     print("Generating the frames...")
     for idx in tqdm.tqdm(range(frames), unit=" frames", ncols=80):
-        pos = (((idx / rate)) * sr) / stride / bars
+        pos = ((idx / rate) * sr) / stride / bars
         off = int(pos)
         loc = pos - off
         denvs = []
         for env in envs:
-            env1 = env[off * bars:(off + 1) * bars]
-            env2 = env[(off + 1) * bars:(off + 2) * bars]
+            env1 = env[off * bars : (off + 1) * bars]
+            env2 = env[(off + 1) * bars : (off + 2) * bars]
 
             # we want loud parts to be updated faster
             maxvol = math.log10(1e-4 + env2.max()) * 10
@@ -243,18 +272,39 @@ def visualize(audio,
         audio_cmd += ["-t", str(duration)]
     print("Encoding the animation video... ")
     # https://hamelot.io/visualization/using-ffmpeg-to-convert-a-set-of-images-into-a-video/
-    sp.run([
-        "ffmpeg", "-y", "-loglevel", "panic", "-r",
-        str(rate), "-f", "image2", "-s", f"{size[0]}x{size[1]}", "-i", "%06d.png"
-    ] + audio_cmd + [
-        "-c:a", "aac", "-vcodec", "libx264", "-crf", "10", "-pix_fmt", "yuv420p",
-        out.resolve()
-    ],
-           check=True,
-           cwd=tmp)
+    sp.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "panic",
+            "-r",
+            str(rate),
+            "-f",
+            "image2",
+            "-s",
+            f"{size[0]}x{size[1]}",
+            "-i",
+            "%06d.png",
+        ]
+        + audio_cmd
+        + [
+            "-c:a",
+            "aac",
+            "-vcodec",
+            "libx264",
+            "-crf",
+            "10",
+            "-pix_fmt",
+            "yuv420p",
+            out.resolve(),
+        ],
+        check=True,
+        cwd=tmp,
+    )
 
 
-def parse_color(colorstr):
+def parse_color(colorstr: str) -> tuple[float, float, float]:
     """
     Given a comma separated rgb(a) colors, returns a 4-tuple of float.
     """
@@ -262,76 +312,135 @@ def parse_color(colorstr):
         r, g, b = [float(i) for i in colorstr.split(",")]
         return r, g, b
     except ValueError:
-        fatal("Format for color is 3 floats separated by commas 0.xx,0.xx,0.xx, rgb order")
+        fatal(
+            "Format for color is 3 floats separated by commas 0.xx,0.xx,0.xx, rgb order"
+        )
         raise
 
 
-def main():
+def parse_size_token(token: str) -> tuple[int, int]:
+    """Parse a *WxH* string used by the ``--size`` CLI option.
+    
+    Returns a ``(width, height)`` tuple.
+    """
+    try:
+        w_str, h_str = token.lower().split("x")
+        width, height = int(w_str), int(h_str)
+        if width <= 0 or height <= 0:
+            raise ValueError
+        return width, height
+    except Exception as exc:  # noqa: BLE001
+        fatal("--size must be in the form <width>x<height>, e.g. 640x360")
+        raise ValueError("Invalid --size parameter") from exc
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(
-        'seewav', description="Generate a nice mp4 animation from an audio file.")
+        "seewav", description="Generate a nice mp4 animation from an audio file."
+    )
     parser.add_argument("-r", "--rate", type=int, default=60, help="Video framerate.")
-    parser.add_argument("--stereo", action='store_true',
-                        help="Create 2 waveforms for stereo files.")
-    parser.add_argument("-c",
-                        "--color",
-                        default=[0.03, 0.6, 0.3],
-                        type=parse_color,
-                        dest="color",
-                        help="Color of the bars as `r,g,b` in [0, 1].")
-    parser.add_argument("-c2",
-                        "--color2",
-                        default=[0.5, 0.3, 0.6],
-                        type=parse_color,
-                        dest="color2",
-                        help="Color of the second waveform as `r,g,b` in [0, 1] (for stereo).")
-    parser.add_argument("--white", action="store_true",
-                        help="Use white background. Default is black.")
-    parser.add_argument("-B",
-                        "--bars",
-                        type=int,
-                        default=50,
-                        help="Number of bars on the video at once")
-    parser.add_argument("-O", "--oversample", type=float, default=4,
-                        help="Lower values will feel less reactive.")
-    parser.add_argument("-T", "--time", type=float, default=0.4,
-                        help="Amount of audio shown at once on a frame.")
-    parser.add_argument("-S", "--speed", type=float, default=4,
-                        help="Higher values means faster transitions between frames.")
-    parser.add_argument("-W",
-                        "--width",
-                        type=int,
-                        default=480,
-                        help="width in pixels of the animation")
-    parser.add_argument("-H",
-                        "--height",
-                        type=int,
-                        default=300,
-                        help="height in pixels of the animation")
-    parser.add_argument("-s", "--seek", type=float, help="Seek to time in seconds in video.")
-    parser.add_argument("-d", "--duration", type=float, help="Duration in seconds from seek time.")
-    parser.add_argument("audio", type=Path, help='Path to audio file')
-    parser.add_argument("out",
-                        type=Path,
-                        nargs='?',
-                        default=Path('out.mp4'),
-                        help='Path to output file. Default is ./out.mp4')
+    parser.add_argument(
+        "--stereo", action="store_true", help="Create 2 waveforms for stereo files."
+    )
+    parser.add_argument(
+        "-c",
+        "--color",
+        default=[0.03, 0.6, 0.3],
+        type=parse_color,
+        dest="color",
+        help="Color of the bars as `r,g,b` in [0, 1].",
+    )
+    parser.add_argument(
+        "-c2",
+        "--color2",
+        default=[0.5, 0.3, 0.6],
+        type=parse_color,
+        dest="color2",
+        help="Color of the second waveform as `r,g,b` in [0, 1] (for stereo).",
+    )
+    parser.add_argument(
+        "--white", action="store_true", help="Use white background. Default is black."
+    )
+    parser.add_argument(
+        "-B", "--bars", type=int, default=50, help="Number of bars on the video at once"
+    )
+    parser.add_argument(
+        "-O",
+        "--oversample",
+        type=float,
+        default=4,
+        help="Lower values will feel less reactive.",
+    )
+    parser.add_argument(
+        "-T",
+        "--time",
+        type=float,
+        default=0.4,
+        help="Amount of audio shown at once on a frame.",
+    )
+    parser.add_argument(
+        "-S",
+        "--speed",
+        type=float,
+        default=4,
+        help="Higher values means faster transitions between frames.",
+    )
+    parser.add_argument(
+        "-W",
+        "--width",
+        type=int,
+        default=480,
+        help="Width of the animation in pixels.",
+    )
+    parser.add_argument(
+        "-H",
+        "--height",
+        type=int,
+        default=300,
+        help="Height of the animation in pixels.",
+    )
+
+    parser.add_argument(
+        "--size",
+        metavar="WxH",
+        default=None,
+        help="Output video dimension (e.g. 640x360). Overrides --width/--height when provided.",
+    )
+    parser.add_argument(
+        "-s", "--seek", type=float, help="Seek to time in seconds in video."
+    )
+    parser.add_argument(
+        "-d", "--duration", type=float, help="Duration in seconds from seek time."
+    )
+    parser.add_argument("audio", type=Path, help="Path to audio file")
+    parser.add_argument(
+        "out",
+        type=Path,
+        nargs="?",
+        default=Path("out.mp4"),
+        help="Path to output file. Default is ./out.mp4",
+    )
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as tmp:
-        visualize(args.audio,
-                  Path(tmp),
-                  args.out,
-                  seek=args.seek,
-                  duration=args.duration,
-                  rate=args.rate,
-                  bars=args.bars,
-                  speed=args.speed,
-                  oversample=args.oversample,
-                  time=args.time,
-                  fg_color=args.color,
-                  fg_color2=args.color2,
-                  bg_color=[1. * bool(args.white)] * 3,
-                  size=(args.width, args.height),
-                  stereo=args.stereo)
+        visualize(
+            args.audio,
+            Path(tmp),
+            args.out,
+            seek=args.seek,
+            duration=args.duration,
+            rate=args.rate,
+            bars=args.bars,
+            speed=args.speed,
+            oversample=args.oversample,
+            time=args.time,
+            fg_color=args.color,
+            fg_color2=args.color2,
+            bg_color=[1.0 * bool(args.white)] * 3,
+            size=parse_size_token(args.size)
+            if args.size
+            else (args.width, args.height),
+            stereo=args.stereo,
+        )
 
 
 if __name__ == "__main__":
