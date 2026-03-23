@@ -108,23 +108,51 @@ def envelope(wav, window, stride):
     return out
 
 
-def draw_env(envs, out, fg_colors, bg_color, size):
+def load_bg_image(path, size):
     """
-    Internal function, draw a single frame (two frames for stereo) using cairo and save
-    it to the `out` file as png. envs is a list of envelopes over channels, each env
-    is a float[bars] representing the height of the envelope to draw. Each entry will
-    be represented by a bar.
+    Load a background image from `path`, resize it to `size` (width, height),
+    and return the pixel data as a `bytes` object in Cairo ARGB32 (BGRA) format.
+    The bytes are serialized once here so that each frame only needs a single
+    cheap copy to initialize its surface.
     """
-    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, *size)
+    from PIL import Image
+    img = Image.open(path).convert("RGBA").resize(size, Image.LANCZOS)
+    img_array = np.array(img)
+    # Cairo ARGB32 stores channels as BGRA on little-endian systems
+    bgra = img_array[:, :, [2, 1, 0, 3]]
+    return bgra.tobytes()
+
+
+def draw_env(envs, fg_colors, bg_color, size, bg_image=None):
+    """
+    Internal function, draw a single frame (two frames for stereo) using cairo and return
+    the raw BGRA pixel data as a memoryview. envs is a list of envelopes over channels,
+    each env is a float[bars] representing the height of the envelope to draw. Each entry
+    will be represented by a bar. If `bg_image` is a bytes object (pre-serialized BGRA pixels
+    from load_bg_image) it is used to initialize the surface in a single copy; otherwise
+    the solid `bg_color` is used.
+    """
+    width, height = size
+    if bg_image is not None:
+        # bytearray copy of the pre-serialized background initializes the surface
+        # directly — one memory copy instead of zero-fill + composite.
+        frame_data = bytearray(bg_image)
+        surface = cairo.ImageSurface.create_for_data(
+            frame_data, cairo.FORMAT_ARGB32, width, height)
+    else:
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, *size)
+
     ctx = cairo.Context(surface)
+
+    if bg_image is None:
+        ctx.set_source_rgb(*bg_color)
+        ctx.rectangle(0, 0, *size)
+        ctx.fill()
+
     ctx.scale(*size)
 
-    ctx.set_source_rgb(*bg_color)
-    ctx.rectangle(0, 0, 1, 1)
-    ctx.fill()
-
     K = len(envs) # Number of waves to draw (waves are stacked vertically)
-    T = len(envs[0]) # Numbert of time steps
+    T = len(envs[0]) # Number of time steps
     pad_ratio = 0.1 # spacing ratio between 2 bars
     width = 1. / (T * (1 + 2 * pad_ratio))
     pad = pad_ratio * width
@@ -145,7 +173,7 @@ def draw_env(envs, out, fg_colors, bg_color, size):
             ctx.line_to(pad + step * delta, midrule + 0.9 * half)
             ctx.stroke()
 
-    surface.write_to_png(out)
+    return surface.get_data()
 
 
 def interpole(x1, y1, x2, y2, x):
@@ -165,6 +193,7 @@ def visualize(audio,
               fg_color=(.2, .2, .2),
               fg_color2=(.5, .3, .6),
               bg_color=(1, 1, 1),
+              bg_image=None,
               size=(400, 400),
               stereo=False,
               ):
@@ -182,6 +211,7 @@ def visualize(audio,
     `fg_color` is the rgb color to use for the foreground.
     `fg_color2` is the rgb color to use for the second wav if stereo is set.
     `bg_color` is the rgb color to use for the background.
+    `bg_image` is an optional path to an image file (e.g. JPG, PNG) to use as the background image.
     `size` is the `(width, height)` in pixels to generate.
     `stereo` is whether to create 2 waves.
     """
@@ -190,6 +220,14 @@ def visualize(audio,
     except (IOError, ValueError) as err:
         fatal(err)
         raise
+
+    bg_pixel_data = None
+    if bg_image is not None:
+        try:
+            bg_pixel_data = load_bg_image(bg_image, size)
+        except (OSError, ValueError) as err:
+            fatal(f"Could not load background image: {err}")
+            raise
     # wavs is a list of wav over channels
     wavs = []
     if stereo:
@@ -216,6 +254,27 @@ def visualize(audio,
     frames = int(rate * duration)
     smooth = np.hanning(bars)
 
+    # Start a single ffmpeg process that reads raw BGRA frames from stdin.
+    # This eliminates per-frame PNG encoding/writing/reading entirely.
+    video_input_cmd = [
+        "ffmpeg", "-y", "-loglevel", "panic",
+        "-f", "rawvideo", "-pix_fmt", "bgra",
+        "-s", f"{size[0]}x{size[1]}",
+        "-r", str(rate),
+        "-i", "pipe:0",
+    ]
+    audio_cmd = []
+    if seek is not None:
+        audio_cmd += ["-ss", str(seek)]
+    audio_cmd += ["-i", str(audio.resolve())]
+    audio_cmd += ["-t", str(duration)]
+    encode_cmd = [
+        "-c:a", "aac", "-vcodec", "libx264", "-crf", "10", "-pix_fmt", "yuv420p",
+        str(out.resolve()),
+    ]
+    ffmpeg_proc = sp.Popen(
+        video_input_cmd + audio_cmd + encode_cmd, stdin=sp.PIPE)
+
     print("Generating the frames...")
     for idx in tqdm.tqdm(range(frames), unit=" frames", ncols=80):
         pos = (((idx / rate)) * sr) / stride / bars
@@ -233,25 +292,14 @@ def visualize(audio,
             denv = (1 - w) * env1 + w * env2
             denv *= smooth
             denvs.append(denv)
-        draw_env(denvs, tmp / f"{idx:06d}.png", (fg_color, fg_color2), bg_color, size)
+        frame_data = draw_env(denvs, (fg_color, fg_color2), bg_color, size,
+                              bg_image=bg_pixel_data)
+        ffmpeg_proc.stdin.write(frame_data)
 
-    audio_cmd = []
-    if seek is not None:
-        audio_cmd += ["-ss", str(seek)]
-    audio_cmd += ["-i", audio.resolve()]
-    if duration is not None:
-        audio_cmd += ["-t", str(duration)]
-    print("Encoding the animation video... ")
-    # https://hamelot.io/visualization/using-ffmpeg-to-convert-a-set-of-images-into-a-video/
-    sp.run([
-        "ffmpeg", "-y", "-loglevel", "panic", "-r",
-        str(rate), "-f", "image2", "-s", f"{size[0]}x{size[1]}", "-i", "%06d.png"
-    ] + audio_cmd + [
-        "-c:a", "aac", "-vcodec", "libx264", "-crf", "10", "-pix_fmt", "yuv420p",
-        out.resolve()
-    ],
-           check=True,
-           cwd=tmp)
+    ffmpeg_proc.stdin.close()
+    retcode = ffmpeg_proc.wait()
+    if retcode:
+        raise sp.CalledProcessError(retcode, ffmpeg_proc.args)
 
 
 def parse_color(colorstr):
@@ -286,6 +334,12 @@ def main():
                         help="Color of the second waveform as `r,g,b` in [0, 1] (for stereo).")
     parser.add_argument("--white", action="store_true",
                         help="Use white background. Default is black.")
+    parser.add_argument("-b",
+                        "--background",
+                        type=Path,
+                        default=None,
+                        dest="background",
+                        help="Path to an image file (JPG, PNG, etc.) to use as the video background.")
     parser.add_argument("-B",
                         "--bars",
                         type=int,
@@ -330,6 +384,7 @@ def main():
                   fg_color=args.color,
                   fg_color2=args.color2,
                   bg_color=[1. * bool(args.white)] * 3,
+                  bg_image=args.background,
                   size=(args.width, args.height),
                   stereo=args.stereo)
 
